@@ -1,63 +1,201 @@
 Customer Churn Analytics + Business Dashboard
 
-1) Problem Statement
-Telecom companies lose revenue when customers cancel their subscription. This system predicts churn risk and converts predictions into actionable business recommendations.
+1) Executive Summary
+Customer Churn Analytics is a minimal, production-ready ML system that predicts customer churn and provides actionable retention insights. The system is intentionally simple and stable for deployment on Render and local use. It separates responsibilities cleanly:
+- FastAPI backend handles inference.
+- Streamlit frontend handles user interaction.
+- No data files or training logic are required at runtime.
 
-2) Production Architecture (Minimal and Stable)
+2) Problem Statement
+Telecom companies lose revenue when customers cancel their subscriptions. This system predicts churn risk for each customer using subscription and service attributes, then translates risk into business actions. The primary goals are:
+- Early detection of churn risk.
+- Consistent, explainable business recommendations.
+- Fast and reliable inference in production.
+
+3) System Architecture (Production)
 User (Streamlit) -> POST /predict -> FastAPI -> Feature Engineering -> Model -> Response
 
-Key rules:
-- No CSV loading at runtime
-- No training at runtime
-- No SHAP or heavy compute in production
-- Model is loaded once from models/best_model.joblib
+Design principles:
+- No CSV loading at runtime.
+- No training or SHAP at runtime.
+- Model is loaded once from models/best_model.joblib.
+- Inputs are validated and aligned before inference.
 
-3) Tech Stack
+4) Tech Stack
+Runtime:
 - Python 3.11
 - FastAPI + Uvicorn
 - Streamlit
 - Pandas, NumPy, scikit-learn, Joblib
+- Requests (dashboard to API)
 
-4) Runtime Files (Keep Only)
-- src/api.py
-- src/dashboard.py
-- src/features.py
-- src/insights.py
-- src/schemas.py
-- src/config.py
-- models/best_model.joblib
-- requirements.txt
+5) Runtime Files (Keep Only)
+- src/api.py (inference service)
+- src/dashboard.py (UI)
+- src/features.py (feature engineering)
+- src/insights.py (business recommendations)
+- src/schemas.py (API request/response models)
+- src/config.py (model path)
+- models/best_model.joblib (pre-trained pipeline)
+- requirements.txt (runtime dependencies)
 
-5) API Behavior
+6) Feature Engineering (src/features.py)
+The API applies feature engineering before inference. The feature logic is consistent with model training and includes:
+
+Tenure features:
+- tenure_months
+- tenure_years
+
+Monetary features:
+- monthly_charges
+- total_charges
+- avg_monthly_charges = total_charges / (tenure_months + 1)
+
+RFM-style proxies:
+- recency = max_tenure - tenure_months
+- frequency = count of "Yes" across service columns
+- monetary = total_charges
+
+Engagement score:
+- engagement_score = frequency * 2 + tenure_months / 6
+
+Complaint proxy:
+- complaint_proxy = TechSupport == Yes + OnlineSecurity == No + DeviceProtection == No
+
+7) API Input Schema (POST /predict)
+Required raw attributes:
+- customerID
+- gender
+- SeniorCitizen
+- Partner
+- Dependents
+- tenure
+- PhoneService
+- MultipleLines
+- InternetService
+- OnlineSecurity
+- OnlineBackup
+- DeviceProtection
+- TechSupport
+- StreamingTV
+- StreamingMovies
+- Contract
+- PaperlessBilling
+- PaymentMethod
+- MonthlyCharges
+- TotalCharges
+
+Notes:
+- Missing fields are filled with safe defaults.
+- The API aligns input columns to match model expectations.
+- Feature engineering runs inside the API to ensure consistency.
+
+8) API Behavior (src/api.py)
 Endpoints:
 - GET / -> {"message": "API is running"}
 - GET /health -> {"status": "ok" | "model_not_loaded"}
-- POST /predict -> returns churn probability, label, and insights
+- POST /predict -> returns churn probability, churn label, and insights
 
-Input:
-- Send raw customer attributes
-- API applies feature engineering before inference
-- Missing fields are filled safely
+Prediction flow:
+1. Validate input with Pydantic schemas.
+2. Build a DataFrame from records.
+3. Fill missing fields and align columns to model expectations.
+4. Apply feature engineering.
+5. Predict churn probability and label.
+6. Generate business insights.
 
-6) Dashboard Behavior
-- Collects customer inputs via form
-- Sends request to deployed API
-- Displays churn probability and insights
+Error handling:
+- Returns 503 if the model is not loaded.
+- Returns 400 with error detail for invalid input or processing failures.
 
-7) Local Run
-1. Create venv and install dependencies
+9) Business Insights (src/insights.py)
+Business recommendations are rule-based and generated from engineered features:
+- High value + high risk -> retention discount
+- Low engagement + high risk -> re-engagement campaign
+- Complaint risk + high risk -> priority support
+- Otherwise -> standard engagement
+
+10) Dashboard Behavior (src/dashboard.py)
+The dashboard is API-only and contains no ML logic.
+
+UI flow:
+1. User enters customer attributes in a form.
+2. Dashboard sends POST /predict to the API URL.
+3. Dashboard renders churn probability and insights.
+
+Key rule:
+- The dashboard never loads local CSVs or models.
+
+Dashboard features (final):
+- Clean single-page form for customer input.
+- Required inputs mapped to the API schema.
+- Predict button triggers API call and displays results.
+- Displays churn probability with two-decimal precision.
+- Displays business insights as bullet points.
+- Graceful error handling for API failures (shows message).
+
+How to explain the dashboard in interviews:
+- It is a lightweight UI that collects inputs and delegates all ML logic to the API.
+- It enforces the data contract (schema-aligned fields).
+- It is deployment-friendly because it has no local data/model dependencies.
+- It demonstrates real-world separation of concerns between UI and inference.
+
+11) Complete Project Flow (End-to-End)
+1. User enters customer attributes in the Streamlit form.
+2. Dashboard sends a POST request to /predict.
+3. API validates input using Pydantic schemas.
+4. API fills missing fields and aligns columns to model expectations.
+5. API applies feature engineering.
+6. The model predicts churn probability and label.
+7. Business insights are generated from engineered features.
+8. API returns JSON response to the dashboard.
+9. Dashboard renders the probability and insights.
+
+12) Project Files and Folder Structure
+Root:
+- src/
+   - api.py (FastAPI inference service)
+   - dashboard.py (Streamlit UI)
+   - features.py (feature engineering)
+   - insights.py (business rules)
+   - schemas.py (request/response schemas)
+   - config.py (model path)
+- models/
+   - best_model.joblib (pre-trained pipeline)
+- requirements.txt (runtime dependencies)
+- runtime.txt (Python version for Render)
+- CustomerChurnAnalytics.txt (documentation)
+- README.md (quick start)
+
+11) Local Run
+1. Create and activate a virtual environment:
    python -m venv .venv
    .\.venv\Scripts\Activate.ps1
+2. Install dependencies:
    pip install -r requirements.txt
-2. Run API
+3. Start API:
    uvicorn src.api:app --host 0.0.0.0 --port 8000
-3. Run dashboard
+4. Start dashboard:
    streamlit run src/dashboard.py
 
-8) Render Deployment
-API Start Command:
-   uvicorn src.api:app --host 0.0.0.0 --port $PORT
+12) Render Deployment
+API:
+- Build: pip install -r requirements.txt
+- Start: uvicorn src.api:app --host 0.0.0.0 --port $PORT
 
-Dashboard Start Command:
-   streamlit run src/dashboard.py --server.port $PORT --server.address 0.0.0.0
+Dashboard:
+- Build: pip install -r requirements.txt
+- Start: streamlit run src/dashboard.py --server.port $PORT --server.address 0.0.0.0
+
+13) Operational Notes
+- Keep models/best_model.joblib in the repo for production inference.
+- If you retrain locally, replace the model file and redeploy.
+- Render Free instances can sleep; the first request may be slower.
+
+14) Scope and Non-Goals
+This production runtime does not include:
+- Training pipelines
+- SHAP or heavy explainability
+- Raw or processed datasets
+- Report generation
 
