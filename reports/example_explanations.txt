@@ -1,0 +1,1 @@
+Likely churn drivers: num__avg_monthly_charges=-1.4461007333509535 (impact 1.596), cat__customerID_7590-VHVEG=1.0 (impact -0.487), cat__InternetService_DSL=1.0 (impact -0.461), num__frequency=-1.1506918569552613 (impact -0.421), num__tenure_years=-1.2829574909037207 (impact 0.378)
