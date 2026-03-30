@@ -1,345 +1,63 @@
-Customer Churn Analytics + Business Dashboard 
+Customer Churn Analytics + Business Dashboard
 
-1) Problem Statement (Proper Explanation)
-Telecom companies lose revenue when customers cancel their subscription. This project solves two connected problems:
-1) Predict churn risk for each customer using subscription and service usage signals.
-2) Turn predictions into business actions so retention teams can respond with targeted interventions.
-The goal is to reduce churn by identifying high-risk customers early and providing explainable, actionable insights for decision-makers.
+1) Problem Statement
+Telecom companies lose revenue when customers cancel their subscription. This system predicts churn risk and converts predictions into actionable business recommendations.
 
-2) Project Overview
-This project predicts customer churn and turns predictions into business actions. It includes:
-- Advanced feature engineering (RFM-style, tenure metrics, engagement, complaint proxy)
-- Model comparison (Logistic Regression, Random Forest, XGBoost, LightGBM)
-- Explainability using SHAP (global importance and example explanation)
-- FastAPI inference service
-- Streamlit dashboard for KPIs, filters, and customer-level insights
+2) Production Architecture (Minimal and Stable)
+User (Streamlit) -> POST /predict -> FastAPI -> Feature Engineering -> Model -> Response
 
-3) End-to-End Architecture and Data Flow
-This project runs as a clear sequence of stages from raw data to business action:
-1. Data collection
-  - Raw Telco churn CSV is placed in data/raw/.
-2. Data cleaning and preparation (src/data_prep.py)
-  - Load the raw CSV, fix data types, handle missing values, and deduplicate rows.
-  - Keep the churn label and clean billing fields (TotalCharges).
-3. Feature engineering (src/features.py)
-  - Build tenure, monetary, RFM-style proxies, engagement, and complaint proxy features.
-  - Produce an enriched dataset suitable for modeling.
-4. Model training and selection (src/train.py)
-  - Build a preprocessing pipeline (encoding + scaling).
-  - Train multiple models and select the best by ROC-AUC.
-  - Save the best pipeline to models/best_model.joblib.
-5. Explainability (src/explain.py)
-  - Compute SHAP values for the trained model.
-  - Save global feature importance and an example explanation.
-6. Inference API (src/api.py)
-  - Load the saved model pipeline.
-  - Accept new customer records, apply the same feature logic, and return churn risk.
-7. Business insights (src/insights.py)
-  - Convert churn risk and customer signals into actionable retention recommendations.
-8. Dashboard (src/dashboard.py)
-  - Surface KPIs, filters, SHAP importance, and per-customer predictions for stakeholders.
+Key rules:
+- No CSV loading at runtime
+- No training at runtime
+- No SHAP or heavy compute in production
+- Model is loaded once from models/best_model.joblib
 
-4) Tech Stack
-Programming language:
-- Python 3.11 or 3.12
+3) Tech Stack
+- Python 3.11
+- FastAPI + Uvicorn
+- Streamlit
+- Pandas, NumPy, scikit-learn, Joblib
 
-Libraries (data and ML):
-- Pandas, NumPy, scikit-learn
-- XGBoost, LightGBM
-- SHAP
-
-Frameworks and tools:
-- FastAPI + Uvicorn (inference API)
-- Streamlit (dashboard)
-- Plotly (visualization)
-
-5) Project Files and Structure
-- src/
-  - data_prep.py     (load + clean data, build features)
-  - features.py      (feature engineering)
-  - train.py         (train models and save best pipeline)
-  - explain.py       (SHAP explainability outputs)
-  - api.py           (FastAPI inference service)
-  - dashboard.py     (Streamlit dashboard)
-  - insights.py      (business insight rules)
-  - schemas.py       (Pydantic request/response schemas)
-  - config.py        (paths + config constants)
-- data/raw/           (raw dataset CSV)
-- data/processed/     (engineered features CSV)
-- models/             (best_model.joblib)
+4) Runtime Files (Keep Only)
+- src/api.py
+- src/dashboard.py
+- src/features.py
+- src/insights.py
+- src/schemas.py
+- src/config.py
+- models/best_model.joblib
 - requirements.txt
 
-6) Dataset Details
-Dataset: IBM Telco Customer Churn (Kaggle)
-Expected file:
-- data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv
-
-The dataset contains demographic attributes, account information, service subscriptions, and billing data.
-Target variable: Churn (Yes/No)
-
-Download options:
-A) Kaggle CLI
-  kaggle datasets download -d blastchar/telco-customer-churn -p data/raw --unzip
-B) Manual
-  Download from Kaggle and place the CSV in data/raw
-
-7) Data Preprocessing (src/data_prep.py)
-Key preprocessing steps include:
-- Load raw CSV and standardize column formats.
-- Convert TotalCharges to numeric; handle non-numeric values.
-- Remove duplicates by customerID.
-- Drop rows where target label (Churn) is missing.
-- Fill missing TotalCharges with 0 (new accounts with no billing history).
-- Apply feature engineering and save output to data/processed/churn_features.csv.
-
-8) Feature Engineering (src/features.py)
-Tenure features:
-- tenure_months
-- tenure_years
-
-Monetary features:
-- monthly_charges
-- total_charges
-- avg_monthly_charges = total_charges / (tenure_months + 1)
-
-RFM-style features (proxy from subscription data):
-- recency = max_tenure - tenure_months
-- frequency = count of "Yes" across service columns
-- monetary = total_charges
-
-Engagement score:
-- engagement_score = frequency * 2 + tenure_months / 6
-
-Complaint proxy:
-- complaint_proxy = TechSupport == Yes + OnlineSecurity == No + DeviceProtection == No
-
-Note: The Telco dataset has no true complaints or transactions. These are proxies for business needs and should be replaced with real data when available.
-
-9) Exploratory Data Analysis (EDA)
-This project focuses on modeling and business delivery, so EDA is minimal in code. The primary analysis surfaces are:
-- Dashboard KPIs (overall churn rate, high-risk count).
-- Feature importance (SHAP) for global interpretability.
-
-If deeper EDA is required (distributions, correlations, segment churn rates), it can be added in a dedicated notebook or a new analysis script.
-
-10) Model Building (src/train.py)
-Models trained and compared:
-- Logistic Regression (baseline, class_weight balanced)
-- Random Forest (n_estimators=300)
-- XGBoost (n_estimators=500, max_depth=6, learning_rate=0.05)
-- LightGBM (n_estimators=500, learning_rate=0.05)
-
-Preprocessing pipeline:
-- OneHotEncoder for categorical features (handle_unknown=ignore)
-- StandardScaler for numeric features
-
-The best model is selected by ROC-AUC and saved to models/best_model.joblib as a full pipeline (preprocessor + model).
-
-11) Evaluation Metrics
-Metrics computed during training:
-- Accuracy
-- ROC-AUC
-- Precision
-- Recall
-
-These are recorded to reports/metrics.csv and reports/metrics.json when training is run.
-
-12) Hyperparameter Tuning
-Hyperparameter tuning is limited to fixed, hand-picked settings (not an automated grid or Bayesian search). The configuration reflects reasonable defaults for performance and stability. If more optimization is needed, add a tuning script using GridSearchCV or Optuna.
-
-13) Explainability (src/explain.py)
-Steps:
-- Load the best pipeline.
-- Transform features using the pipeline preprocessor.
-- Compute SHAP values for the model.
-- Save global importance and a summary plot.
-- Save one example explanation.
-
-Outputs (generated on demand):
-- reports/shap_importance.csv
-- reports/shap_summary.png
-- reports/example_explanations.txt
-
-14) Results and Interpretation
-The best model is chosen by highest ROC-AUC. Exact metric values are stored in:
-- reports/metrics.csv
-- reports/metrics.json
-
-Interpretation is supported through SHAP:
-- Global importance shows which features most influence churn overall.
-- Example explanation provides a case-level narrative for a single customer.
-
-15) Business Insights Logic (src/insights.py)
-Rule-based actions based on churn risk and customer profile:
-- High value + high risk -> retention discount
-- Low engagement + high risk -> re-engagement campaign
-- Complaint risk + high risk -> priority support
-- Otherwise -> standard engagement
-
-16) FastAPI Service (src/api.py)
+5) API Behavior
 Endpoints:
-- GET /health
-- POST /predict
+- GET / -> {"message": "API is running"}
+- GET /health -> {"status": "ok" | "model_not_loaded"}
+- POST /predict -> returns churn probability, label, and insights
 
-Request schema (JSON):
-{
-  "records": [
-    {
-      "customerID": "0001-ABCD",
-      "gender": "Female",
-      "SeniorCitizen": 0,
-      "Partner": "Yes",
-      "Dependents": "No",
-      "tenure": 12,
-      "PhoneService": "Yes",
-      "MultipleLines": "No",
-      "InternetService": "Fiber optic",
-      "OnlineSecurity": "No",
-      "OnlineBackup": "Yes",
-      "DeviceProtection": "No",
-      "TechSupport": "No",
-      "StreamingTV": "Yes",
-      "StreamingMovies": "No",
-      "Contract": "Month-to-month",
-      "PaperlessBilling": "Yes",
-      "PaymentMethod": "Electronic check",
-      "MonthlyCharges": 79.85,
-      "TotalCharges": 3320.5
-    }
-  ]
-}
+Input:
+- Send raw customer attributes
+- API applies feature engineering before inference
+- Missing fields are filled safely
 
-Response:
-- churn_probability
-- churn_label
-- insights (business actions)
+6) Dashboard Behavior
+- Collects customer inputs via form
+- Sends request to deployed API
+- Displays churn probability and insights
 
-Sample curl:
-  curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -d @payload.json
-
-17) Dashboard (src/dashboard.py)
-Purpose:
-The Streamlit dashboard is the business-facing interface. It summarizes churn risk at a glance and allows users to filter customers and view customer-level predictions with recommended actions.
-
-Data sources used by the dashboard:
-- data/processed/churn_features.csv (prepared dataset with engineered features)
-- models/best_model.joblib (trained pipeline used for predictions)
-- reports/shap_importance.csv (global feature importance, optional)
-
-Main sections and behavior:
-1. Page setup
-  - Wide layout for KPI cards and charts.
-  - Title: "Customer Churn Analytics Dashboard".
-
-2. Filters
-  - Contract filter (multiselect) lets users view a subset of customers.
-  - If a filter is applied, all KPIs and predictions reflect the filtered data only.
-
-3. KPI cards
-  - Total Customers: count of rows after filters.
-  - Churn Rate %: percentage of customers with Churn == Yes.
-  - High-risk customers: count of customers with churn probability >= 0.5.
-
-4. Feature importance chart
-  - If reports/shap_importance.csv exists, the top features are shown in a horizontal bar chart.
-  - If the SHAP file is missing, a message prompts the user to run src/explain.py.
-
-5. Customer-level prediction
-  - A dropdown selects a specific customerID.
-  - The model predicts churn probability for that customer.
-  - Business insights are generated and displayed as bullet points.
-
-Notes:
-- The dashboard uses caching for data and model loading to improve responsiveness.
-- Predictions are computed on the fly using the same pipeline saved during training.
-
-18) Local Run - End to End (From Scratch)
+7) Local Run
 1. Create venv and install dependencies
    python -m venv .venv
    .\.venv\Scripts\Activate.ps1
    pip install -r requirements.txt
-
-2. Download data (see section 6)
-
-3. Prepare data
-   python -m src.data_prep
-   Output: data/processed/churn_features.csv
-
-4. Train and compare models
-   python -m src.train
-   Output: models/best_model.joblib
-
-5. Explainability (optional but recommended)
-   python -m src.explain
-   Output: reports/shap_importance.csv, reports/shap_summary.png
-
-6. Run API
+2. Run API
    uvicorn src.api:app --host 0.0.0.0 --port 8000
+3. Run dashboard
+   streamlit run src/dashboard.py
 
-7. Run dashboard
-   streamlit run src.dashboard.py
+8) Render Deployment
+API Start Command:
+   uvicorn src.api:app --host 0.0.0.0 --port $PORT
 
-19) Local Run - Minimal (If model and processed data already exist)
-- Start API and dashboard directly:
-  uvicorn src.api:app --host 0.0.0.0 --port 8000
-  streamlit run src.dashboard.py
-
-20) Deployment (No Docker)
-A) Render (Recommended)
-API Service:
-- Type: Web Service
-- Build command: pip install -r requirements.txt
-- Start command: uvicorn src.api:app --host 0.0.0.0 --port $PORT
-
-Step-by-step for Render (API):
-1. Create a new Web Service in Render.
-2. Connect your GitHub repository.
-3. Set the root directory to the project root.
-4. Build command: pip install -r requirements.txt
-5. Start command: uvicorn src.api:app --host 0.0.0.0 --port $PORT
-6. Add a persistent disk or include the model file in the repo (models/best_model.joblib).
-7. Deploy and copy the public URL.
-
-Dashboard Service:
-- Type: Web Service
-- Build command: pip install -r requirements.txt
-- Start command: streamlit run src/dashboard.py --server.port $PORT --server.address 0.0.0.0
-
-Step-by-step for Render (Dashboard):
-1. Create a second Web Service in Render.
-2. Connect the same GitHub repository.
-3. Build command: pip install -r requirements.txt
-4. Start command: streamlit run src/dashboard.py --server.port $PORT --server.address 0.0.0.0
-5. Ensure data files exist (data/processed/churn_features.csv) or generate them during build.
-6. Deploy and copy the public URL.
-
-Notes:
-- Store data files or load from a persistent volume.
-- If you want live predictions, keep the model file in models/best_model.joblib or retrain on startup.
-- If deploying API and dashboard separately, both services need access to the same model and processed data.
-- Optionally add a health check path: /health for the API.
-
-B) AWS EC2 (FastAPI + Streamlit)
-1. Launch EC2 (Ubuntu), open ports 8000 and 8501 in security group
-2. Install Python 3.11, pip, and git
-3. Clone repository and install dependencies
-4. Start services:
-   uvicorn src.api:app --host 0.0.0.0 --port 8000
-   streamlit run src/dashboard.py --server.port 8501 --server.address 0.0.0.0
-5. Optional: create systemd services for persistence
-
-21) Troubleshooting
-- Missing dataset: verify data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv
-- Dashboard has no SHAP chart: run python -m src.explain
-- API error for missing model: run python -m src.train
-- Import error for src: run as a module (python -m src.train) or ensure src/__init__.py exists
-
-22) Rebuild Artifacts
-- Processed data: python -m src.data_prep
-- Model: python -m src.train
-- SHAP outputs: python -m src.explain
-
-23) Ports
-- FastAPI: 8000
-- Streamlit: 8501
+Dashboard Start Command:
+   streamlit run src/dashboard.py --server.port $PORT --server.address 0.0.0.0
 

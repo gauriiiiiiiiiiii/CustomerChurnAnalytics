@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Tuple
 
 import joblib
 import pandas as pd
@@ -15,6 +15,33 @@ try:
     model = joblib.load(MODEL_PATH)
 except Exception:
     model = None
+
+
+def _extract_columns() -> Tuple[List[str], List[str]]:
+    preprocessor = model.named_steps.get("preprocessor") if model else None
+    if preprocessor is None:
+        return [], []
+
+    cat_cols: List[str] = []
+    num_cols: List[str] = []
+    for name, _, cols in preprocessor.transformers:
+        if name == "cat":
+            cat_cols.extend(list(cols))
+        elif name == "num":
+            num_cols.extend(list(cols))
+
+    return cat_cols, num_cols
+
+
+def _ensure_columns(df: pd.DataFrame, cat_cols: List[str], num_cols: List[str]) -> pd.DataFrame:
+    df = df.copy()
+    for col in cat_cols:
+        if col not in df.columns:
+            df[col] = "No"
+    for col in num_cols:
+        if col not in df.columns:
+            df[col] = 0
+    return df
 
 
 @app.get("/")
@@ -35,7 +62,14 @@ def predict(request: PredictRequest):
 
     try:
         df = pd.DataFrame([r.dict() for r in request.records])
+        cat_cols, num_cols = _extract_columns()
+
+        df = _ensure_columns(df, cat_cols, num_cols)
         df = add_features(df)
+        df = _ensure_columns(df, cat_cols, num_cols)
+        expected_cols = cat_cols + num_cols
+        if expected_cols:
+            df = df[expected_cols]
 
         proba = model.predict_proba(df)[:, 1]
         preds = (proba >= 0.5).astype(int)
