@@ -1,23 +1,14 @@
 from typing import List
-
-import joblib
 import pandas as pd
 from fastapi import FastAPI
 
-from src.config import MODEL_PATH
+from src.data_prep import clean_data, load_raw_data
 from src.features import add_features
 from src.insights import generate_insights
 from src.schemas import PredictRequest, PredictResponse, PredictResponseItem
+from src.train import train_best_model
 
 app = FastAPI(title="Customer Churn Analytics API")
-
-model = None
-
-
-@app.on_event("startup")
-def load_model() -> None:
-    global model
-    model = joblib.load(MODEL_PATH)
 
 
 @app.get("/health")
@@ -27,6 +18,11 @@ def health():
 
 @app.post("/predict", response_model=PredictResponse)
 def predict(request: PredictRequest):
+    raw_df = load_raw_data()
+    clean_df = clean_data(raw_df)
+    feature_df = add_features(clean_df)
+    model = train_best_model(feature_df, save_artifacts=False)
+
     df = pd.DataFrame([r.dict() for r in request.records])
     df = add_features(df)
 

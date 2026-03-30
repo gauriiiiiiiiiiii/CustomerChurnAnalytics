@@ -47,7 +47,7 @@ def evaluate_model(model, X_test, y_test) -> Dict[str, float]:
     }
 
 
-def train_and_compare(df: pd.DataFrame) -> pd.DataFrame:
+def _train_all_models(df: pd.DataFrame) -> Tuple[Dict[str, Pipeline], pd.DataFrame]:
     X = df.drop(columns=[TARGET_COL])
     y = (df[TARGET_COL] == "Yes").astype(int)
 
@@ -78,7 +78,7 @@ def train_and_compare(df: pd.DataFrame) -> pd.DataFrame:
     }
 
     results = []
-    trained_models = {}
+    trained_models: Dict[str, Pipeline] = {}
 
     for name, model in models.items():
         pipeline = Pipeline(steps=[("preprocessor", preprocessor), ("model", model)])
@@ -89,6 +89,25 @@ def train_and_compare(df: pd.DataFrame) -> pd.DataFrame:
         trained_models[name] = pipeline
 
     metrics_df = pd.DataFrame(results).sort_values(by="roc_auc", ascending=False)
+    return trained_models, metrics_df
+
+
+def train_best_model(df: pd.DataFrame, save_artifacts: bool = False) -> Pipeline:
+    trained_models, metrics_df = _train_all_models(df)
+    best_name = metrics_df.iloc[0]["model"]
+
+    if save_artifacts:
+        joblib.dump(trained_models[best_name], MODEL_PATH)
+        METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        metrics_df.to_csv(METRICS_PATH, index=False)
+        with open(METRICS_PATH.with_suffix(".json"), "w", encoding="utf-8") as f:
+            json.dump(metrics_df.to_dict(orient="records"), f, indent=2)
+
+    return trained_models[best_name]
+
+
+def train_and_compare(df: pd.DataFrame) -> pd.DataFrame:
+    trained_models, metrics_df = _train_all_models(df)
     best_name = metrics_df.iloc[0]["model"]
 
     joblib.dump(trained_models[best_name], MODEL_PATH)

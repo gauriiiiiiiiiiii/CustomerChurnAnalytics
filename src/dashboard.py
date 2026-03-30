@@ -1,9 +1,10 @@
 import os
 import sys
 
-import joblib
+import numpy as np
 import pandas as pd
 import plotly.express as px
+import shap
 import streamlit as st
 
 # Ensure project root is on sys.path when running via streamlit.
@@ -11,24 +12,17 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.config import DATA_PROCESSED, MODEL_PATH, SHAP_IMPORTANCE_PATH
+from src.data_prep import clean_data, load_raw_data
 from src.features import add_features
 from src.insights import generate_insights
+from src.train import train_best_model
 
 st.set_page_config(page_title="Churn Dashboard", layout="wide")
 
-@st.cache_data
-def load_data():
-    df = pd.read_csv(DATA_PROCESSED)
-    return df
-
-@st.cache_resource
-def load_model():
-    return joblib.load(MODEL_PATH)
-
-
-df = load_data()
-model = load_model()
+raw_df = load_raw_data()
+df = clean_data(raw_df)
+df = add_features(df)
+model = train_best_model(df, save_artifacts=False)
 
 st.title("Customer Churn Analytics Dashboard")
 
@@ -50,12 +44,22 @@ with col3:
     st.metric("High-risk customers", int(high_risk))
 
 st.subheader("Feature importance")
-if SHAP_IMPORTANCE_PATH.exists():
-    importance_df = pd.read_csv(SHAP_IMPORTANCE_PATH).head(15)
-    fig = px.bar(importance_df, x="importance", y="feature", orientation="h")
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.info("Run src/explain.py to generate SHAP importance")
+X = df.drop(columns=["Churn"])
+preprocessor = model.named_steps["preprocessor"]
+X_transformed = preprocessor.transform(X)
+if hasattr(X_transformed, "toarray"):
+    X_transformed = X_transformed.toarray()
+
+feature_names = preprocessor.get_feature_names_out()
+X_df = pd.DataFrame(X_transformed, columns=feature_names)
+explainer = shap.Explainer(model.named_steps["model"], X_df)
+shap_values = explainer(X_df)
+importance = np.abs(shap_values.values).mean(axis=0)
+importance_df = pd.DataFrame({"feature": feature_names, "importance": importance})
+importance_df = importance_df.sort_values(by="importance", ascending=False).head(15)
+
+fig = px.bar(importance_df, x="importance", y="feature", orientation="h")
+st.plotly_chart(fig, use_container_width=True)
 
 st.subheader("Customer-level prediction")
 customer_id = st.selectbox("Customer ID", df["customerID"].unique())
