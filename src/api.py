@@ -11,6 +11,11 @@ from src.train import train_best_model
 app = FastAPI(title="Customer Churn Analytics API")
 
 
+@app.get("/")
+def home():
+    return {"message": "Customer Churn API is running 🚀"}
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}

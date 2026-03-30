@@ -4,6 +4,7 @@ import sys
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import requests
 import shap
 import streamlit as st
 
@@ -14,37 +15,63 @@ if PROJECT_ROOT not in sys.path:
 
 from src.data_prep import clean_data, load_raw_data
 from src.features import add_features
-from src.insights import generate_insights
 from src.train import train_best_model
 
 st.set_page_config(page_title="Churn Dashboard", layout="wide")
 
+API_URL = "https://churn-api-y0y2.onrender.com"
+CUSTOMER_FIELDS = [
+    "customerID",
+    "gender",
+    "SeniorCitizen",
+    "Partner",
+    "Dependents",
+    "tenure",
+    "PhoneService",
+    "MultipleLines",
+    "InternetService",
+    "OnlineSecurity",
+    "OnlineBackup",
+    "DeviceProtection",
+    "TechSupport",
+    "StreamingTV",
+    "StreamingMovies",
+    "Contract",
+    "PaperlessBilling",
+    "PaymentMethod",
+    "MonthlyCharges",
+    "TotalCharges",
+]
+
 raw_df = load_raw_data()
-df = clean_data(raw_df)
-df = add_features(df)
-model = train_best_model(df, save_artifacts=False)
+base_df = clean_data(raw_df)
+feature_df = add_features(base_df)
+model = train_best_model(feature_df, save_artifacts=False)
 
 st.title("Customer Churn Analytics Dashboard")
 
 st.subheader("Filters")
-plan_filter = st.multiselect("Contract", options=sorted(df["Contract"].dropna().unique().tolist()))
+plan_filter = st.multiselect(
+    "Contract", options=sorted(base_df["Contract"].dropna().unique().tolist())
+)
 if plan_filter:
-    df = df[df["Contract"].isin(plan_filter)]
+    base_df = base_df[base_df["Contract"].isin(plan_filter)]
+    feature_df = feature_df.loc[base_df.index]
 
-proba = model.predict_proba(df.drop(columns=["Churn"]))[:, 1]
+proba = model.predict_proba(feature_df.drop(columns=["Churn"]))[:, 1]
 high_risk = (proba >= 0.5).sum()
 
 col1, col2, col3 = st.columns(3)
 with col1:
-    st.metric("Total Customers", len(df))
+    st.metric("Total Customers", len(base_df))
 with col2:
-    churn_rate = (df["Churn"] == "Yes").mean() * 100
+    churn_rate = (base_df["Churn"] == "Yes").mean() * 100
     st.metric("Churn Rate %", f"{churn_rate:.1f}")
 with col3:
     st.metric("High-risk customers", int(high_risk))
 
 st.subheader("Feature importance")
-X = df.drop(columns=["Churn"])
+X = feature_df.drop(columns=["Churn"])
 preprocessor = model.named_steps["preprocessor"]
 X_transformed = preprocessor.transform(X)
 if hasattr(X_transformed, "toarray"):
@@ -62,15 +89,17 @@ fig = px.bar(importance_df, x="importance", y="feature", orientation="h")
 st.plotly_chart(fig, use_container_width=True)
 
 st.subheader("Customer-level prediction")
-customer_id = st.selectbox("Customer ID", df["customerID"].unique())
-row = df[df["customerID"] == customer_id].iloc[0]
-row_df = pd.DataFrame([row])
-row_df = add_features(row_df)
+customer_id = st.selectbox("Customer ID", base_df["customerID"].unique())
+row = base_df[base_df["customerID"] == customer_id].iloc[0]
+payload = {"records": [{k: row.get(k) for k in CUSTOMER_FIELDS}]}
 
-proba = model.predict_proba(row_df.drop(columns=["Churn"]))[:, 1][0]
-insights = generate_insights(row_df.iloc[0].to_dict(), float(proba))
-
-st.write(f"Churn probability: {proba:.2f}")
-st.write("Insights:")
-for item in insights["insights"]:
-    st.write(f"- {item}")
+try:
+    response = requests.post(f"{API_URL}/predict", json=payload, timeout=30)
+    response.raise_for_status()
+    prediction = response.json()["predictions"][0]
+    st.write(f"Churn probability: {prediction['churn_probability']:.2f}")
+    st.write("Insights:")
+    for item in prediction["insights"]:
+        st.write(f"- {item}")
+except requests.RequestException as exc:
+    st.error(f"API request failed: {exc}")
