@@ -1,0 +1,814 @@
+================================================================================
+  CUSTOMER CHURN ANALYTICS — COMPLETE PROJECT DOCUMENTATION
+================================================================================
+  Type    : Machine Learning | Classification | Production System
+  Dataset : IBM Telco Customer Churn (Kaggle)
+  Stack   : Python, scikit-learn, FastAPI, Streamlit
+  Updated : 2026-06-06
+================================================================================
+
+
+--------------------------------------------------------------------------------
+  1. WHAT THIS PROJECT DOES
+--------------------------------------------------------------------------------
+
+A telecom company loses money when customers cancel their subscriptions (churn).
+Acquiring a new customer costs 5-7x more than keeping an existing one.
+
+This system:
+  - Predicts the PROBABILITY that a customer will churn (0.0 to 1.0)
+  - Labels them as churn risk: Yes / No
+  - Recommends a BUSINESS ACTION: discount, re-engagement, priority support
+
+Two services:
+  FastAPI backend  -- loads a trained ML model and serves predictions via REST API
+  Streamlit UI     -- form where you fill customer details and see the result
+
+No training happens at runtime. The model was trained once offline and saved.
+The API loads it at startup and uses it for every prediction request.
+
+
+--------------------------------------------------------------------------------
+  2. PROJECT STRUCTURE
+--------------------------------------------------------------------------------
+
+CustomerChurnAnalytics/
+|
+|-- data/
+|   |-- raw/
+|       |-- telco_churn.csv              Real IBM Kaggle dataset (7,043 rows)
+|
+|-- models/
+|   |-- best_model.joblib                Trained sklearn Pipeline (saved model)
+|
+|-- src/
+|   |-- config.py                        MODEL_PATH constant (path to .joblib)
+|   |-- preprocess.py                    Data cleaning + column definitions
+|   |-- features.py                      Feature engineering (11 new features)
+|   |-- schemas.py                       Pydantic request/response models
+|   |-- insights.py                      Rule-based business recommendations
+|   |-- train.py                         End-to-end training pipeline
+|   |-- api.py                           FastAPI server (3 endpoints)
+|   |-- dashboard.py                     Streamlit professional UI
+|   |-- __init__.py                      Empty (makes src a Python package)
+|
+|-- Project.txt                          This file
+|-- PROJECT_DOCS.txt                     Extended documentation
+|-- README.md                            Quick start
+|-- requirements.txt                     Pinned Python dependencies
+|-- runtime.txt                          Python version for Render deployment
+|-- .gitignore                           Ignores .venv, __pycache__, .env
+
+
+--------------------------------------------------------------------------------
+  3. DATASET
+--------------------------------------------------------------------------------
+
+File     : data/raw/telco_churn.csv
+Source   : IBM Telco Customer Churn dataset (Kaggle)
+Rows     : 7,043 customers
+Columns  : 21 (20 features + 1 target)
+Target   : Churn -- "Yes" (left) or "No" (stayed)
+Imbalance: 73.5% No Churn, 26.5% Churn -- imbalanced dataset
+
+COLUMN DESCRIPTIONS:
+  customerID        Unique identifier -- NOT used as model feature
+  gender            Male / Female
+  SeniorCitizen     0 = No, 1 = Yes
+  Partner           Yes / No -- has a partner
+  Dependents        Yes / No -- has dependents
+  tenure            Months the customer has been with the company (0-72)
+  PhoneService      Yes / No
+  MultipleLines     Yes / No / No phone service
+  InternetService   DSL / Fiber optic / No
+  OnlineSecurity    Yes / No / No internet service
+  OnlineBackup      Yes / No / No internet service
+  DeviceProtection  Yes / No / No internet service
+  TechSupport       Yes / No / No internet service
+  StreamingTV       Yes / No / No internet service
+  StreamingMovies   Yes / No / No internet service
+  Contract          Month-to-month / One year / Two year
+  PaperlessBilling  Yes / No
+  PaymentMethod     Electronic check / Mailed check /
+                    Bank transfer (automatic) / Credit card (automatic)
+  MonthlyCharges    Current monthly bill amount ($)
+  TotalCharges      Cumulative charges -- BLANK for new customers (tenure=0)
+  Churn             Target: Yes / No
+
+KEY EDA FINDINGS (from actual data):
+  Churn by Contract:
+    Month-to-month  42.7%  <-- strongest predictor
+    One year        11.3%
+    Two year         2.8%
+
+  Churn by Internet Service:
+    Fiber optic     41.9%  <-- more price sensitive / competition
+    DSL             19.0%
+    No               7.4%
+
+  Churn by Payment Method:
+    Electronic check   45.3%  <-- easiest to cancel
+    Mailed check       19.1%
+    Bank transfer      16.7%
+    Credit card        15.2%
+
+  Churn by Tenure:
+    0-12 months    47.4%  <-- new customers are highest risk
+    12-24 months   28.7%
+    24-48 months   20.4%
+    48-72 months    9.5%
+
+  Numeric averages:
+    Churners     : tenure=18 months, MonthlyCharges=$74, TotalCharges=$1532
+    Non-churners : tenure=38 months, MonthlyCharges=$61, TotalCharges=$2550
+
+
+--------------------------------------------------------------------------------
+  4. DATA CLEANING & PREPROCESSING
+--------------------------------------------------------------------------------
+
+File  : src/preprocess.py
+Called: src/train.py calls run_cleaning_pipeline() before training
+
+STEP 1 -- Fix TotalCharges (stored as string in CSV, blank for new customers)
+  Problem : TotalCharges column has dtype=object (string). Customers with
+            tenure=0 have a blank value -- they haven't received a bill yet.
+  Fix     : Convert to numeric. NaN values filled with MonthlyCharges x tenure.
+  Code    :
+    df["TotalCharges"] = pd.to_numeric(df["TotalCharges"], errors="coerce")
+    df["TotalCharges"] = df["TotalCharges"].fillna(df["MonthlyCharges"] * df["tenure"])
+  Result  : 11 blank values filled. Column is now float64.
+
+STEP 2 -- Fill missing categorical values
+  Problem : Any NaN in categorical columns would break OneHotEncoder.
+  Fix     : Fill with "No" (safe neutral default = service not subscribed).
+  Result  : 0 fills needed in the Telco dataset (clean categoricals).
+
+STEP 3 -- Encode target column
+  Problem : sklearn classifiers need numeric targets, not strings.
+  Fix     : Map "Yes" -> 1, "No" -> 0.
+  Code    : df["Churn"] = df["Churn"].map({"Yes": 1, "No": 0})
+  Result  : 1,869 churners (1), 5,174 non-churners (0).
+
+STEP 4 -- Drop customerID
+  Reason  : customerID is a unique identifier. If used as a feature, the model
+            would memorize IDs instead of learning patterns (data leakage).
+  Code    : df = df.drop(columns=["customerID"])
+
+STEP 5 -- Validate category vocabulary
+  Check   : Every categorical column contains only expected values.
+  Result  : All clean -- no unexpected categories in the Telco dataset.
+
+SKLEARN PREPROCESSING (inside the saved Pipeline):
+  OneHotEncoder on 15 categorical columns
+    Converts text categories to 0/1 binary columns.
+    Example: Contract="Month-to-month" -> [1, 0, 0]
+             Contract="One year"       -> [0, 1, 0]
+             Contract="Two year"       -> [0, 0, 1]
+    handle_unknown="ignore": unseen categories at inference -> all zeros (no crash)
+
+  StandardScaler on 11 numeric columns
+    Normalizes to mean=0, standard deviation=1.
+    Example: tenure=34 -> (34 - 32.37) / 24.56 = 0.07
+    Required for Logistic Regression to converge properly.
+
+COLUMN DEFINITIONS (in preprocess.py):
+  CAT_COLS (15 columns -> OneHotEncoded):
+    gender, Partner, Dependents, PhoneService, MultipleLines,
+    InternetService, OnlineSecurity, OnlineBackup, DeviceProtection,
+    TechSupport, StreamingTV, StreamingMovies, Contract,
+    PaperlessBilling, PaymentMethod
+
+  NUM_COLS (11 columns -> StandardScaled):
+    SeniorCitizen, tenure_months, tenure_years, monthly_charges,
+    total_charges, avg_monthly_charges, recency, frequency,
+    monetary, engagement_score, complaint_proxy
+
+
+--------------------------------------------------------------------------------
+  5. FEATURE ENGINEERING
+--------------------------------------------------------------------------------
+
+File  : src/features.py
+Func  : add_features(df) -> df with new columns
+Called: BOTH in train.py (training) AND api.py (inference) -- must be identical
+
+CRITICAL RULE: Training and inference must use exactly the same feature logic.
+If these differ, the model sees different numbers than it was trained on
+and predictions become wrong (silently -- no error is raised).
+
+FEATURES ADDED:
+
+  Tenure features:
+    tenure_months = tenure
+      Raw tenure kept as explicit named column.
+      Low value = newer customer = higher churn risk.
+
+    tenure_years = tenure / 12
+      Human-readable scale. 0-6 years.
+
+  Monetary features:
+    monthly_charges = MonthlyCharges
+      Current monthly bill. High = price sensitive customer.
+
+    total_charges = TotalCharges (after cleaning)
+      Cumulative lifetime spend. Proxy for customer value.
+
+    avg_monthly_charges = total_charges / (tenure_months + 1)
+      Smoothed spend rate. +1 prevents division by zero for tenure=0.
+      Better than raw TotalCharges for new customers.
+
+  RFM-style proxies (adapted from e-commerce to telecom):
+    RFM = Recency, Frequency, Monetary -- classic customer analytics framework.
+
+    recency = max_tenure - tenure_months
+      How new is this customer relative to the longest-tenured customer?
+      Higher = newer = less loyal = higher churn risk.
+      NOTE: When scoring a single customer in the API, max_tenure = that
+      customer's own tenure, so recency = 0. Acceptable simplification.
+
+    frequency = count of "Yes" across 8 service columns
+      (PhoneService, MultipleLines, OnlineSecurity, OnlineBackup,
+       DeviceProtection, TechSupport, StreamingTV, StreamingMovies)
+      More services = deeper product adoption = harder to leave.
+      Range: 0 to 8.
+
+    monetary = total_charges
+      Same as total_charges. Kept separately for RFM naming consistency.
+
+  Engagement score:
+    engagement_score = frequency * 2 + tenure_months / 6
+      Combines service breadth (frequency) and loyalty (tenure).
+      Frequency weighted 2x because service adoption is a stronger signal.
+      Higher score = more engaged customer = lower churn probability.
+
+  Complaint proxy:
+    complaint_proxy = (TechSupport=="Yes") + (OnlineSecurity=="No")
+                    + (DeviceProtection=="No")
+      Proxy for customer dissatisfaction. Range: 0 to 3.
+        +1 if TechSupport=="Yes"      customer has active support problem
+        +1 if OnlineSecurity=="No"    missing security = unmet need
+        +1 if DeviceProtection=="No"  missing protection = value gap
+      Score 0 = satisfied, Score 3 = highly dissatisfied
+
+
+--------------------------------------------------------------------------------
+  6. MODEL TRAINING
+--------------------------------------------------------------------------------
+
+File  : src/train.py
+Run   : python src/train.py
+Output: models/best_model.joblib
+
+PIPELINE STRUCTURE:
+  Pipeline([
+      ("preprocessor", ColumnTransformer([
+          ("cat", OneHotEncoder(handle_unknown="ignore"), CAT_COLS),
+          ("num", StandardScaler(), NUM_COLS),
+      ])),
+      ("model", best_classifier)
+  ])
+
+  The entire pipeline is fitted as one object and saved.
+  At inference, predict_proba() runs both the preprocessor AND the model
+  automatically -- no manual preprocessing needed at inference time.
+
+TRAIN / TEST SPLIT:
+  Method     : Stratified split (80% train, 20% test)
+  Train size : 5,634 rows -- churn rate 26.5%
+  Test size  : 1,409 rows -- churn rate 26.5%
+  Stratified : yes -- preserves churn ratio in both sets
+
+MODELS COMPARED (5-fold Stratified Cross-Validation):
+  Cross-validation uses the training set only.
+  Test set is held out and touched only once at the end.
+
+  Model                   CV ROC-AUC   Notes
+  ----------------------  ----------   ----------------------------------------
+  Logistic Regression     0.8487       Fast, interpretable, good baseline
+  Random Forest           0.8468       Ensemble, handles non-linear patterns
+  Gradient Boosting       0.8458       Strong on tabular data, slow to train
+
+  WINNER: Logistic Regression (highest CV AUC = 0.8487)
+
+WHY LOGISTIC REGRESSION WON:
+  - 7,043 rows is a relatively small dataset
+  - After feature engineering + one-hot encoding, features are well-structured
+  - Logistic Regression is highly effective on clean, well-engineered tabular data
+  - Trees overfit slightly more on small datasets
+
+SAVING THE MODEL:
+  joblib.dump(best_pipeline, "models/best_model.joblib")
+  The saved file contains BOTH the preprocessor and the classifier.
+  Size: 9.2 KB
+
+
+--------------------------------------------------------------------------------
+  7. MODEL EVALUATION (ACTUAL RESULTS)
+--------------------------------------------------------------------------------
+
+These are the REAL numbers from running src/train.py on the Telco dataset.
+
+  Metric       Value    Explanation
+  ----------   ------   ---------------------------------------------------------
+  ROC-AUC      0.8465   Ranking quality across all thresholds. Good for imbalanced
+                         data. 1.0 = perfect, 0.5 = random guessing.
+  Recall       0.5374   54% of actual churners correctly identified.
+                         100% - 54% = 46% are missed (false negatives).
+  Precision    0.6814   68% of predicted churners actually churned.
+                         32% were false alarms (false positives).
+  F1           0.6009   Harmonic mean of recall and precision.
+  Accuracy     0.8100   NOT the primary metric -- misleading with 73/27 split.
+
+WHY ACCURACY IS MISLEADING:
+  A model that always says "No Churn" gets 73.5% accuracy. That's useless.
+  ROC-AUC and Recall are the right metrics for imbalanced churn prediction.
+
+CONFUSION MATRIX (at threshold 0.5):
+  True Negative  (correctly kept)      : 941
+  False Positive (wrong alarm)         :  94  <- wasted retention spend
+  False Negative (missed churner)      : 173  <- most costly miss
+  True Positive  (correctly caught)    : 201
+
+THRESHOLD SENSITIVITY:
+  Threshold   Recall   Precision   F1       Note
+  ---------   ------   ---------   ------   --------------------------------
+  0.3         0.7620   0.5337      0.6278   Catch more churners, more alarms
+  0.4         0.6604   0.5812      0.6183
+  0.5         0.5374   0.6814      0.6009   Default (used in api.py)
+  0.6         0.3663   0.7135      0.4841
+  0.7         0.2273   0.8019      0.3542   Fewer alarms, miss more churners
+
+  Lower threshold = higher recall = catch more churners = more false alarms
+  Higher threshold = higher precision = fewer false alarms = miss more churners
+  Business should choose based on: cost of missed churn vs cost of false alarm
+
+BUSINESS COST LOGIC:
+  False Negative (missed churner) = lose entire customer lifetime value
+  False Positive (wrong alarm)    = cost of one retention offer only
+  Therefore: lean toward lower threshold (higher recall) in most cases.
+
+
+--------------------------------------------------------------------------------
+  8. API REFERENCE
+--------------------------------------------------------------------------------
+
+File    : src/api.py
+Server  : Uvicorn (ASGI)
+Framework: FastAPI
+
+LOCAL URL  : http://localhost:8000
+DEPLOYED   : https://churn-api-y0y2.onrender.com
+
+ENDPOINTS:
+
+  GET /
+    Returns : {"message": "Customer Churn Analytics API is running"}
+    Purpose : Basic liveness check
+
+  GET /health
+    Returns : {"status": "ok"} or {"status": "model_not_loaded"}
+    Purpose : Check if model loaded successfully at startup
+
+  POST /predict
+    Purpose : Predict churn for one or more customers (batch supported)
+
+    Request body (JSON):
+      {
+        "records": [
+          {
+            "customerID":       "7590-VHVEG",
+            "gender":           "Female",
+            "SeniorCitizen":    0,
+            "Partner":          "Yes",
+            "Dependents":       "No",
+            "tenure":           1,
+            "PhoneService":     "No",
+            "MultipleLines":    "No phone service",
+            "InternetService":  "DSL",
+            "OnlineSecurity":   "No",
+            "OnlineBackup":     "Yes",
+            "DeviceProtection": "No",
+            "TechSupport":      "No",
+            "StreamingTV":      "No",
+            "StreamingMovies":  "No",
+            "Contract":         "Month-to-month",
+            "PaperlessBilling": "Yes",
+            "PaymentMethod":    "Electronic check",
+            "MonthlyCharges":   29.85,
+            "TotalCharges":     29.85
+          }
+        ]
+      }
+
+    Note: All fields except customerID, SeniorCitizen, tenure, MonthlyCharges
+    are optional. Missing fields default to "No" / 0.
+
+    Response (JSON):
+      {
+        "predictions": [
+          {
+            "customerID":        "7590-VHVEG",
+            "churn_probability": 0.72,
+            "churn_label":       "Yes",
+            "insights": [
+              "Send re-engagement email campaign",
+              "Route to priority support to address complaints"
+            ]
+          }
+        ]
+      }
+
+INTERNAL REQUEST FLOW:
+  1. JSON arrives -> Pydantic validates all fields
+  2. Convert to pandas DataFrame
+  3. Save customerIDs (before column trimming drops them)
+  4. Fill missing categorical columns with "No"
+  5. Fill missing numeric columns with 0
+  6. Call add_features(df) -> adds 11 engineered columns
+  7. Fill any missing engineered columns
+  8. Select only the columns the model was trained on (in correct order)
+  9. model.predict_proba(df)[:, 1] -> churn probabilities
+  10. Apply threshold 0.5 -> churn_label Yes/No
+  11. generate_insights(row, probability) -> business actions
+  12. Return JSON response
+
+
+--------------------------------------------------------------------------------
+  9. BUSINESS INSIGHTS LOGIC
+--------------------------------------------------------------------------------
+
+File  : src/insights.py
+Func  : generate_insights(row, churn_probability) -> {"insights": [...]}
+
+Rule-based logic. Three rules evaluated independently (multiple can fire).
+Uses engineered features (total_charges, engagement_score, complaint_proxy).
+
+  RULE 1: High-value customer at high churn risk
+    Condition : churn_probability >= 0.7 AND total_charges > 4000
+    Action    : "Offer retention discount to protect high-value customer"
+    Reason    : Customer has spent a lot -- losing them is very costly.
+                Threshold is 0.7 (not 0.6) because discounts are expensive.
+
+  RULE 2: Low-engagement customer at moderate-high risk
+    Condition : churn_probability >= 0.6 AND engagement_score < 6
+    Action    : "Send re-engagement email campaign"
+    Reason    : Customer uses few services and has low tenure -- pull them back in.
+
+  RULE 3: Dissatisfied customer at moderate-high risk
+    Condition : churn_probability >= 0.6 AND complaint_proxy >= 2
+    Action    : "Route to priority support to address complaints"
+    Reason    : Customer shows dissatisfaction signals -- fix the problem first.
+
+  DEFAULT: No strong signal
+    Action    : "Continue standard engagement and monitor"
+
+WHY RULE-BASED (NOT SHAP):
+  - Deterministic -- same input always gives same output
+  - Zero latency -- no extra model call
+  - Easy for business users to understand and adjust thresholds
+  - SHAP requires an extra compute call per prediction and needs governance
+
+
+--------------------------------------------------------------------------------
+  10. DASHBOARD
+--------------------------------------------------------------------------------
+
+File   : src/dashboard.py
+Run    : streamlit run src/dashboard.py
+Opens  : http://localhost:8501 (auto-opens in browser)
+
+LAYOUT:
+  Sidebar (left panel):
+    Customer Profile form with 4 sections:
+      Personal      : CustomerID, Gender, Senior, Partner, Dependents, Tenure
+      Phone Service : PhoneService, MultipleLines (auto-disabled if No phone)
+      Internet      : InternetService + 6 add-on services (auto-disabled if No)
+      Contract      : Contract, PaperlessBilling, PaymentMethod, Charges
+
+    Predict Churn Risk button (primary, full width)
+
+  Main area (right panel) -- BEFORE prediction:
+    How it works (3 columns)
+    Model information metrics
+
+  Main area (right panel) -- AFTER prediction:
+    Alert bar: colored red/yellow/green based on risk level
+    Probability gauge with progress bar
+    3 metric cards: Probability %, Label, Risk Level
+    Customer Summary (6 key fields)
+    Retention Recommendations (insight cards with blue left border)
+    Why This Risk Level (list of detected risk factors)
+
+RISK CLASSIFICATION:
+  >= 0.70  High Risk    -- red alert, immediate action
+  >= 0.40  Medium Risk  -- yellow alert, monitor and outreach
+  <  0.40  Low Risk     -- green alert, customer appears stable
+
+API CALL:
+  The dashboard POSTs to API_URL + "/predict" with a JSON payload.
+  Currently set to the deployed Render URL.
+  Change to http://localhost:8000 for local testing.
+
+TO CHANGE API URL:
+  Open src/dashboard.py, line ~46:
+  Change: API_URL = "https://churn-api-y0y2.onrender.com"
+  To    : API_URL = "http://localhost:8000"
+
+
+--------------------------------------------------------------------------------
+  11. HOW TO RUN THE PROJECT (STEP BY STEP)
+--------------------------------------------------------------------------------
+
+PREREQUISITES:
+  - Python 3.11 or 3.12 installed
+  - Git (to clone the repo)
+  - The file data/raw/telco_churn.csv must be present
+
+------ STEP 1: Set up virtual environment (run once) ------
+
+  Windows (PowerShell):
+    python -m venv .venv
+    .venv\Scripts\Activate.ps1
+    pip install -r requirements.txt
+
+  Mac/Linux:
+    python -m venv .venv
+    source .venv/bin/activate
+    pip install -r requirements.txt
+
+------ STEP 2: Train the model (run once, or to retrain) ------
+
+  python src/train.py
+
+  This will:
+    - Load data/raw/telco_churn.csv
+    - Clean the data (fix TotalCharges, encode target, drop customerID)
+    - Print EDA patterns (churn rates by contract, internet, payment, tenure)
+    - Engineer 11 new features
+    - Split 80/20, run 5-fold cross-validation on 3 models
+    - Fit the best model on full training set
+    - Print evaluation metrics on test set
+    - Print threshold sensitivity table
+    - Save models/best_model.joblib (9.2 KB)
+
+  Expected output (key lines):
+    LogisticRegression    AUC = 0.8487
+    RandomForest          AUC = 0.8468
+    GradientBoosting      AUC = 0.8458
+    Best -> LogisticRegression
+    ROC-AUC   : 0.8465
+    Recall    : 0.5374
+    Saved to  : models/best_model.joblib
+
+------ STEP 3: Start the API ------
+
+  Open Terminal 1:
+    uvicorn src.api:app --host 0.0.0.0 --port 8000
+
+  You should see:
+    INFO: Uvicorn running on http://0.0.0.0:8000
+
+  Test it:
+    Open browser -> http://localhost:8000
+    Should show: {"message": "Customer Churn Analytics API is running"}
+
+    Open browser -> http://localhost:8000/health
+    Should show: {"status": "ok"}
+
+    Open browser -> http://localhost:8000/docs
+    FastAPI auto-generated interactive API documentation
+
+------ STEP 4: Start the Dashboard ------
+
+  Before starting, make sure API_URL in src/dashboard.py is:
+    API_URL = "http://localhost:8000"
+
+  Open Terminal 2 (keep Terminal 1 running):
+    streamlit run src/dashboard.py
+
+  Browser auto-opens at: http://localhost:8501
+
+  If browser doesn't open automatically:
+    Open browser manually -> http://localhost:8501
+
+------ STEP 5: Use the Dashboard ------
+
+  1. Fill in customer details in the sidebar
+  2. Click "Predict Churn Risk"
+  3. See: churn probability, risk level, retention recommendations
+
+------ QUICK TEST CUSTOMER (high churn risk) ------
+
+  Use these values to see a high-risk prediction:
+    Contract        : Month-to-month
+    Tenure          : 2 months
+    Internet Service: Fiber optic
+    Online Security : No
+    Tech Support    : No
+    Device Protect  : No
+    Payment Method  : Electronic check
+    Monthly Charges : 70.70
+    Total Charges   : 141.40
+    Partner         : No
+    Dependents      : No
+
+  Expected: churn probability ~0.70+, churn_label = Yes
+
+
+--------------------------------------------------------------------------------
+  12. DEPLOYMENT (RENDER)
+--------------------------------------------------------------------------------
+
+Both services deployed separately on Render (free tier).
+
+API SERVICE:
+  Start command : uvicorn src.api:app --host 0.0.0.0 --port 8000
+  URL           : https://churn-api-y0y2.onrender.com
+  IMPORTANT     : models/best_model.joblib must be present in the deployed repo.
+                  It is a binary file (9.2 KB) and is not in .gitignore.
+
+DASHBOARD SERVICE:
+  Start command : streamlit run src/dashboard.py
+  After deploy  : Dashboard calls the Render API URL automatically.
+
+runtime.txt:
+  Contains "python-3.11.8"
+  Render reads this to provision the correct Python version.
+
+.gitignore:
+  .venv/
+  __pycache__/
+  *.pyc
+  .env
+
+DEPLOYMENT STEPS:
+  1. Push code + models/best_model.joblib to GitHub
+  2. Create Render service for API -> connect GitHub repo
+  3. Set start command: uvicorn src.api:app --host 0.0.0.0 --port 8000
+  4. Create Render service for Dashboard -> connect same repo
+  5. Set start command: streamlit run src/dashboard.py
+  6. Dashboard API_URL should point to the Render API URL
+
+
+--------------------------------------------------------------------------------
+  13. TECH STACK
+--------------------------------------------------------------------------------
+
+Library        Version   Role
+-------------  -------   ------------------------------------------------------
+Python         3.11.8    Runtime
+pandas         2.2.2     DataFrame loading, cleaning, feature engineering
+numpy          2.0.1     Numeric operations
+scikit-learn   1.5.1     ML Pipeline, ColumnTransformer, models, metrics
+joblib         1.4.2     Model serialization (save/load Pipeline)
+FastAPI        0.112.2   REST API framework (async, auto docs)
+Uvicorn        0.30.6    ASGI server for FastAPI
+Streamlit      1.37.1    Dashboard UI (Python-native web app)
+requests       2.33.0    HTTP client (dashboard -> API calls)
+pydantic       2.8.2     Request/response validation and schema enforcement
+
+
+--------------------------------------------------------------------------------
+  14. FILE-BY-FILE EXPLANATION
+--------------------------------------------------------------------------------
+
+src/config.py
+  One job: defines MODEL_PATH = project_root / "models" / "best_model.joblib"
+  Used by api.py (to load model) and train.py (to save model).
+  Centralizes the path so if you move the file, change it in one place.
+
+src/preprocess.py
+  Defines CAT_COLS and NUM_COLS (the column lists the model was trained on).
+  Contains all 6 cleaning steps as separate functions.
+  Contains build_preprocessor() which creates the ColumnTransformer.
+  train.py imports and calls run_cleaning_pipeline() and build_preprocessor().
+  api.py indirectly uses CAT_COLS/NUM_COLS through _extract_columns().
+
+src/features.py
+  Single function: add_features(df) -> df with 11 new columns.
+  Called in train.py before fitting, and in api.py before predict_proba().
+  Both calls must produce identical output -- any difference = wrong predictions.
+
+src/schemas.py
+  Pydantic models for the API:
+    CustomerRecord     : one customer's input (20 fields, most optional)
+    PredictRequest     : list of CustomerRecords (batch support)
+    PredictResponseItem: one prediction result (ID + probability + label + insights)
+    PredictResponse    : list of PredictResponseItems
+  FastAPI uses these to auto-validate every request and auto-generate docs.
+
+src/insights.py
+  Single function: generate_insights(row_dict, probability) -> insights list.
+  Three business rules evaluated independently.
+  Uses engineered features (total_charges, engagement_score, complaint_proxy).
+
+src/train.py
+  Full training pipeline in one script.
+  Functions: run_cleaning_pipeline, print_eda, engineer, train, save.
+  Outputs: prints metrics to console, saves best_model.joblib.
+
+src/api.py
+  FastAPI app with 3 endpoints: /, /health, /predict.
+  Loads model at startup.
+  _extract_columns(): reads column lists from saved model's preprocessor.
+  _ensure_columns(): fills missing columns with safe defaults.
+  /predict: 9-step process from JSON to prediction response.
+
+src/dashboard.py
+  Streamlit app with sidebar form and main results area.
+  No model, no data -- only builds JSON payload and calls the API.
+  Professional UI with color-coded risk badges, progress bar, insight cards.
+
+
+--------------------------------------------------------------------------------
+  15. INTERVIEW Q&A
+--------------------------------------------------------------------------------
+
+Q: Why Logistic Regression and not Gradient Boosting?
+A: Cross-validation on 7,043 rows showed Logistic Regression had the highest
+   ROC-AUC (0.8487 vs 0.8468 Random Forest vs 0.8458 Gradient Boosting).
+   With good feature engineering on a small dataset, linear models often
+   outperform tree ensembles. Trees can overfit without enough data.
+
+Q: Why rule-based insights instead of SHAP?
+A: Rule-based is deterministic, zero latency, no extra compute, and easy
+   for business users to read and adjust. SHAP requires an extra model call
+   per prediction and needs careful governance for consistency. Can be added
+   as an offline report feature later.
+
+Q: How do you handle unseen categories at inference?
+A: Two ways: (1) _ensure_columns() fills completely missing columns with "No".
+   (2) OneHotEncoder(handle_unknown="ignore") silently handles unexpected
+   values by producing an all-zero row for that category. No crash.
+
+Q: What threshold would you use if retention costs are high?
+A: Raise threshold (e.g., 0.6 or 0.7) to reduce false positives.
+   At threshold 0.7: Precision = 0.80, Recall = 0.23.
+   Business must define cost(FN) vs cost(FP) and minimize total cost.
+
+Q: How do you ensure training / inference consistency?
+A: The sklearn Pipeline saves BOTH the preprocessor and model in one file.
+   The fitted OneHotEncoder and StandardScaler from training automatically
+   run inside predict_proba() at inference. Feature engineering in
+   src/features.py is called identically in train.py and api.py.
+
+Q: How would you monitor model degradation in production?
+A: Track feature distributions (PSI score) vs training baselines weekly.
+   Monitor AUC and Recall on delayed labels (after outcomes are known).
+   Alert and retrain when drift exceeds threshold.
+
+Q: Why is recency = 0 for single-customer inference?
+A: recency = max_tenure - tenure_months. For a single customer, max_tenure
+   equals that customer's own tenure, so recency = 0 always. This is a known
+   simplification. For batch scoring, it works correctly relative to the batch.
+   Fix: save max_tenure from training and use it at inference time.
+
+Q: How do you explain a prediction to a business stakeholder?
+A: Show churn probability (e.g., 82%), the churn label (Yes), and the
+   business insight (e.g., "Offer retention discount"). Point to the top
+   risk factors: short tenure, month-to-month contract, electronic check.
+   The dashboard's "Why This Risk Level?" section shows these automatically.
+
+Q: What's the biggest production risk?
+A: Schema drift -- if the upstream system starts sending different column
+   names or category values. Mitigated by Pydantic validation, _ensure_columns
+   defaults, OneHotEncoder handle_unknown="ignore", and monitoring.
+
+
+--------------------------------------------------------------------------------
+  16. FUTURE IMPROVEMENTS
+--------------------------------------------------------------------------------
+
+  [ ] Lower threshold from 0.5 to 0.3 to increase recall in production
+  [ ] Save max_tenure at training time and use it in recency at inference
+  [ ] Add drift monitoring -- track feature distributions weekly
+  [ ] Probability calibration (Platt scaling) for better-calibrated scores
+  [ ] Batch scoring endpoint for CRM integration (score all customers nightly)
+  [ ] Offline SHAP explanations for stakeholder PDF reports
+  [ ] A/B test retention campaigns and measure lift in churn reduction
+  [ ] Retrain pipeline with CI/CD when new labeled data is available
+  [ ] Add authentication to the API for production use
+
+
+--------------------------------------------------------------------------------
+  17. CHANGE LOG
+--------------------------------------------------------------------------------
+
+  Date        Change
+  ----------  ----------------------------------------------------------------
+  2026-06-05  Created project from scratch
+  2026-06-05  Added src/preprocess.py, src/train.py, src/preprocess.py
+  2026-06-05  Added real Kaggle IBM Telco dataset to data/raw/telco_churn.csv
+  2026-06-05  Added comments to all src files explaining each step
+  2026-06-05  Rewrote dashboard.py with professional Streamlit UI
+  2026-06-05  Fixed customerID bug in api.py (was returning row index, not ID)
+  2026-06-06  Ran training pipeline -- best model: Logistic Regression
+  2026-06-06  Actual metrics: ROC-AUC=0.8465, Recall=0.537, F1=0.601
+  2026-06-06  Cleaned up data folder -- removed wrong datasets
+  2026-06-06  Created clean Project.txt (this file)
+
+
+================================================================================
+  END OF DOCUMENT
+================================================================================
