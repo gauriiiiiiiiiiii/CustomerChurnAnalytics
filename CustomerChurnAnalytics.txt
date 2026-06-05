@@ -1,7 +1,7 @@
 ================================================================================
-  CUSTOMER CHURN ANALYTICS — COMPLETE PROJECT DOCUMENTATION
+  CUSTOMER CHURN ANALYTICS -- COMPLETE PROJECT DOCUMENTATION
 ================================================================================
-  Type    : Machine Learning | Classification | Production System
+  Type    : Machine Learning | Classification
   Dataset : IBM Telco Customer Churn (Kaggle)
   Stack   : Python, scikit-learn, FastAPI, Streamlit
   Updated : 2026-06-06
@@ -20,7 +20,7 @@ This system:
   - Labels them as churn risk: Yes / No
   - Recommends a BUSINESS ACTION: discount, re-engagement, priority support
 
-Two services:
+Two services run locally:
   FastAPI backend  -- loads a trained ML model and serves predictions via REST API
   Streamlit UI     -- form where you fill customer details and see the result
 
@@ -52,12 +52,11 @@ CustomerChurnAnalytics/
 |   |-- dashboard.py                     Streamlit professional UI
 |   |-- __init__.py                      Empty (makes src a Python package)
 |
-|-- Project.txt                          This file
-|-- PROJECT_DOCS.txt                     Extended documentation
+|-- CustomerChurnAnalytics.txt           This file -- full project documentation
 |-- README.md                            Quick start
-|-- requirements.txt                     Pinned Python dependencies
-|-- runtime.txt                          Python version for Render deployment
-|-- .gitignore                           Ignores .venv, __pycache__, .env
+|-- requirements.txt                     Python dependencies
+|-- runtime.txt                          Python version pin (python-3.11.8)
+|-- .gitignore                           Ignores .venv, __pycache__, .env, .vscode
 
 
 --------------------------------------------------------------------------------
@@ -307,7 +306,7 @@ SAVING THE MODEL:
   7. MODEL EVALUATION (ACTUAL RESULTS)
 --------------------------------------------------------------------------------
 
-These are the REAL numbers from running src/train.py on the Telco dataset.
+These are the real numbers from running src/train.py on the Telco dataset.
 
   Metric       Value    Explanation
   ----------   ------   ---------------------------------------------------------
@@ -353,12 +352,10 @@ BUSINESS COST LOGIC:
   8. API REFERENCE
 --------------------------------------------------------------------------------
 
-File    : src/api.py
-Server  : Uvicorn (ASGI)
+File     : src/api.py
 Framework: FastAPI
-
-LOCAL URL  : http://localhost:8000
-DEPLOYED   : https://churn-api-y0y2.onrender.com
+Server   : Uvicorn (ASGI)
+Local URL: http://localhost:8000
 
 ENDPOINTS:
 
@@ -477,6 +474,7 @@ WHY RULE-BASED (NOT SHAP):
 File   : src/dashboard.py
 Run    : streamlit run src/dashboard.py
 Opens  : http://localhost:8501 (auto-opens in browser)
+Calls  : http://localhost:8000/predict (FastAPI must be running)
 
 LAYOUT:
   Sidebar (left panel):
@@ -505,16 +503,6 @@ RISK CLASSIFICATION:
   >= 0.40  Medium Risk  -- yellow alert, monitor and outreach
   <  0.40  Low Risk     -- green alert, customer appears stable
 
-API CALL:
-  The dashboard POSTs to API_URL + "/predict" with a JSON payload.
-  Currently set to the deployed Render URL.
-  Change to http://localhost:8000 for local testing.
-
-TO CHANGE API URL:
-  Open src/dashboard.py, line ~46:
-  Change: API_URL = "https://churn-api-y0y2.onrender.com"
-  To    : API_URL = "http://localhost:8000"
-
 
 --------------------------------------------------------------------------------
   11. HOW TO RUN THE PROJECT (STEP BY STEP)
@@ -522,7 +510,6 @@ TO CHANGE API URL:
 
 PREREQUISITES:
   - Python 3.11 or 3.12 installed
-  - Git (to clone the repo)
   - The file data/raw/telco_churn.csv must be present
 
 ------ STEP 1: Set up virtual environment (run once) ------
@@ -570,27 +557,17 @@ PREREQUISITES:
     INFO: Uvicorn running on http://0.0.0.0:8000
 
   Test it:
-    Open browser -> http://localhost:8000
-    Should show: {"message": "Customer Churn Analytics API is running"}
-
-    Open browser -> http://localhost:8000/health
-    Should show: {"status": "ok"}
-
-    Open browser -> http://localhost:8000/docs
-    FastAPI auto-generated interactive API documentation
+    http://localhost:8000          -> liveness check
+    http://localhost:8000/health   -> model load status
+    http://localhost:8000/docs     -> interactive API documentation (Swagger UI)
 
 ------ STEP 4: Start the Dashboard ------
-
-  Before starting, make sure API_URL in src/dashboard.py is:
-    API_URL = "http://localhost:8000"
 
   Open Terminal 2 (keep Terminal 1 running):
     streamlit run src/dashboard.py
 
   Browser auto-opens at: http://localhost:8501
-
-  If browser doesn't open automatically:
-    Open browser manually -> http://localhost:8501
+  If it does not open: manually navigate to http://localhost:8501
 
 ------ STEP 5: Use the Dashboard ------
 
@@ -617,42 +594,7 @@ PREREQUISITES:
 
 
 --------------------------------------------------------------------------------
-  12. DEPLOYMENT (RENDER)
---------------------------------------------------------------------------------
-
-Both services deployed separately on Render (free tier).
-
-API SERVICE:
-  Start command : uvicorn src.api:app --host 0.0.0.0 --port 8000
-  URL           : https://churn-api-y0y2.onrender.com
-  IMPORTANT     : models/best_model.joblib must be present in the deployed repo.
-                  It is a binary file (9.2 KB) and is not in .gitignore.
-
-DASHBOARD SERVICE:
-  Start command : streamlit run src/dashboard.py
-  After deploy  : Dashboard calls the Render API URL automatically.
-
-runtime.txt:
-  Contains "python-3.11.8"
-  Render reads this to provision the correct Python version.
-
-.gitignore:
-  .venv/
-  __pycache__/
-  *.pyc
-  .env
-
-DEPLOYMENT STEPS:
-  1. Push code + models/best_model.joblib to GitHub
-  2. Create Render service for API -> connect GitHub repo
-  3. Set start command: uvicorn src.api:app --host 0.0.0.0 --port 8000
-  4. Create Render service for Dashboard -> connect same repo
-  5. Set start command: streamlit run src/dashboard.py
-  6. Dashboard API_URL should point to the Render API URL
-
-
---------------------------------------------------------------------------------
-  13. TECH STACK
+  12. TECH STACK
 --------------------------------------------------------------------------------
 
 Library        Version   Role
@@ -670,7 +612,7 @@ pydantic       2.8.2     Request/response validation and schema enforcement
 
 
 --------------------------------------------------------------------------------
-  14. FILE-BY-FILE EXPLANATION
+  13. FILE-BY-FILE EXPLANATION
 --------------------------------------------------------------------------------
 
 src/config.py
@@ -680,7 +622,7 @@ src/config.py
 
 src/preprocess.py
   Defines CAT_COLS and NUM_COLS (the column lists the model was trained on).
-  Contains all 6 cleaning steps as separate functions.
+  Contains all cleaning steps as separate functions.
   Contains build_preprocessor() which creates the ColumnTransformer.
   train.py imports and calls run_cleaning_pipeline() and build_preprocessor().
   api.py indirectly uses CAT_COLS/NUM_COLS through _extract_columns().
@@ -705,7 +647,7 @@ src/insights.py
 
 src/train.py
   Full training pipeline in one script.
-  Functions: run_cleaning_pipeline, print_eda, engineer, train, save.
+  Loads data -> cleans -> EDA -> features -> split -> CV -> fit -> evaluate -> save.
   Outputs: prints metrics to console, saves best_model.joblib.
 
 src/api.py
@@ -713,16 +655,17 @@ src/api.py
   Loads model at startup.
   _extract_columns(): reads column lists from saved model's preprocessor.
   _ensure_columns(): fills missing columns with safe defaults.
-  /predict: 9-step process from JSON to prediction response.
+  /predict: 12-step process from JSON to prediction response.
 
 src/dashboard.py
   Streamlit app with sidebar form and main results area.
   No model, no data -- only builds JSON payload and calls the API.
   Professional UI with color-coded risk badges, progress bar, insight cards.
+  API_URL = "http://localhost:8000" (FastAPI must be running locally).
 
 
 --------------------------------------------------------------------------------
-  15. INTERVIEW Q&A
+  14. INTERVIEW Q&A
 --------------------------------------------------------------------------------
 
 Q: Why Logistic Regression and not Gradient Boosting?
@@ -777,7 +720,7 @@ A: Schema drift -- if the upstream system starts sending different column
 
 
 --------------------------------------------------------------------------------
-  16. FUTURE IMPROVEMENTS
+  15. FUTURE IMPROVEMENTS
 --------------------------------------------------------------------------------
 
   [ ] Lower threshold from 0.5 to 0.3 to increase recall in production
@@ -789,26 +732,3 @@ A: Schema drift -- if the upstream system starts sending different column
   [ ] A/B test retention campaigns and measure lift in churn reduction
   [ ] Retrain pipeline with CI/CD when new labeled data is available
   [ ] Add authentication to the API for production use
-
-
---------------------------------------------------------------------------------
-  17. CHANGE LOG
---------------------------------------------------------------------------------
-
-  Date        Change
-  ----------  ----------------------------------------------------------------
-  2026-06-05  Created project from scratch
-  2026-06-05  Added src/preprocess.py, src/train.py, src/preprocess.py
-  2026-06-05  Added real Kaggle IBM Telco dataset to data/raw/telco_churn.csv
-  2026-06-05  Added comments to all src files explaining each step
-  2026-06-05  Rewrote dashboard.py with professional Streamlit UI
-  2026-06-05  Fixed customerID bug in api.py (was returning row index, not ID)
-  2026-06-06  Ran training pipeline -- best model: Logistic Regression
-  2026-06-06  Actual metrics: ROC-AUC=0.8465, Recall=0.537, F1=0.601
-  2026-06-06  Cleaned up data folder -- removed wrong datasets
-  2026-06-06  Created clean Project.txt (this file)
-
-
-================================================================================
-  END OF DOCUMENT
-================================================================================
