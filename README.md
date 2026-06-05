@@ -25,7 +25,7 @@ CustomerChurnAnalytics/
 │   ├── schemas.py                    Pydantic request/response models
 │   ├── insights.py                   Rule-based business recommendations
 │   └── config.py                     Model path config
-├── Project.txt                       Full project documentation
+├── CustomerChurnAnalytics.txt        Full project documentation
 ├── requirements.txt
 └── runtime.txt
 ```
@@ -78,4 +78,4 @@ API docs at: `http://localhost:8000/docs`
 | Precision | 0.681 |
 | F1 | 0.601 |
 
-See `CustomerChurnAnalytics.txt` for complete documentation.
+See `CustomerChurnAnalytics.txt` for complete documentation
